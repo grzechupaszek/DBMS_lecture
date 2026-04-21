@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>MOVIE Database Demo</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1>MOVIE Database</h1>
+    <p class="subtitle">Flask + SQLite minimal demo. Pick a query on the left, see the result on the right.</p>
+    <button id="reset-btn" title="Drop the DB file and reload the seed data">Reset database</button>
+  </header>
+
+  <main>
+    <aside id="menu">
+      <p class="hint">Loading queries&hellip;</p>
+    </aside>
+
+    <section id="result">
+      <h2 id="result-title">No query run yet</h2>
+      <pre id="result-sql"></pre>
+      <p id="result-meta"></p>
+      <div id="result-table"></div>
+      <p id="result-error"></p>
+    </section>
+  </main>
+
+  <script src="/script.js"></script>
+</body>
+</html>

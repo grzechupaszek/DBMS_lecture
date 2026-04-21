@@ -1,0 +1,109 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #1f2328;
+  background: #f6f8fa;
+}
+
+header {
+  padding: 1rem 1.5rem;
+  background: #0d1117;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+header h1 { margin: 0; font-size: 1.3rem; }
+header .subtitle { margin: 0; color: #9ba3af; flex: 1; font-size: 0.9rem; }
+
+#reset-btn {
+  background: #b04040;
+  color: #fff;
+  border: 0;
+  padding: 0.5rem 0.9rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+#reset-btn:hover { background: #8a2f2f; }
+
+main {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+#menu {
+  background: #fff;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  padding: 0.5rem;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+}
+
+#menu h3 {
+  margin: 0.8rem 0 0.3rem 0;
+  font-size: 0.85rem;
+  color: #57606a;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+#menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: #f6f8fa;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 0.25rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+#menu button:hover { background: #e7edf4; }
+#menu button.modify { background: #fff4e5; border-color: #e0a561; }
+#menu button.modify:hover { background: #ffe8c7; }
+#menu button.active { background: #0969da; color: #fff; border-color: #0969da; }
+
+#result {
+  background: #fff;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+}
+
+#result h2 { margin-top: 0; }
+
+#result-sql {
+  background: #0d1117;
+  color: #c9d1d9;
+  padding: 0.8rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
+#result-meta { color: #57606a; font-size: 0.9rem; }
+#result-error { color: #b04040; white-space: pre-wrap; }
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-top: 0.5rem;
+}
+th, td {
+  border: 1px solid #d0d7de;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.9rem;
+  text-align: left;
+  vertical-align: top;
+}
+th { background: #f6f8fa; }
+tr:nth-child(even) td { background: #fbfcfd; }

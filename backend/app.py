@@ -47,6 +47,15 @@ def init_db() -> None:
         if fresh:
             with open(SEED_PATH, "r", encoding="utf-8") as f:
                 conn.executescript(f.read())
+        # Always make sure the two demo accounts exist (idempotent).
+        conn.execute(
+            "INSERT OR IGNORE INTO User (username, password, role) VALUES (?, ?, ?)",
+            ("admin", "admin", "admin"),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO User (username, password, role) VALUES (?, ?, ?)",
+            ("grzegorz", "grzegorz", "user"),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -263,6 +272,43 @@ def static_files(path: str):
     return send_from_directory(FRONTEND_DIR, path)
 
 
+@app.route("/api/login", methods=["POST"])
+def login():
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+    if not username or not password:
+        return jsonify({"error": "username and password are required"}), 400
+    rows = run_select(
+        "SELECT user_id, username, role FROM User WHERE username = ? AND password = ?",
+        (username, password),
+    )
+    if not rows:
+        return jsonify({"error": "invalid username or password"}), 401
+    return jsonify({"status": "ok", "user": rows[0]})
+
+
+@app.route("/api/register", methods=["POST"])
+def register():
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+    confirm  = data.get("confirm") or ""
+    if not username or not password:
+        return jsonify({"error": "username and password are required"}), 400
+    if password != confirm:
+        return jsonify({"error": "passwords do not match"}), 400
+    try:
+        run_write(
+            "INSERT INTO User (username, password, role) VALUES (?, ?, 'user')",
+            (username, password),
+        )
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "username already taken"}), 409
+    return jsonify({"status": "ok",
+                    "user": {"username": username, "role": "user"}})
+
+
 @app.route("/api/queries")
 def list_queries():
     categories = {
@@ -321,6 +367,20 @@ def list_companies():
     return jsonify(run_select("SELECT company_id, name FROM ProductionCompany ORDER BY name"))
 
 
+@app.route("/api/actors")
+def list_actors():
+    return jsonify(run_select(
+        "SELECT actor_id, name, date_of_birth FROM Actor ORDER BY name"
+    ))
+
+
+@app.route("/api/directors")
+def list_directors():
+    return jsonify(run_select(
+        "SELECT director_id, name, date_of_birth FROM Director ORDER BY name"
+    ))
+
+
 @app.route("/uploads/<path:fname>")
 def serve_upload(fname: str):
     return send_from_directory(UPLOAD_DIR, fname)
@@ -358,6 +418,10 @@ def _upsert_company(cur: sqlite3.Cursor, name: str | None) -> int | None:
 
 def _upsert_person(cur: sqlite3.Cursor, table: str, id_col: str,
                    name: str, dob: str | None) -> int:
+    name = (name or "").strip()
+    dob  = (dob or "").strip() or None
+
+    # 1. Exact match on (name, dob).
     cur.execute(
         f"SELECT {id_col} FROM {table} "
         f"WHERE name = ? AND IFNULL(date_of_birth,'') = IFNULL(?, '')",
@@ -366,6 +430,17 @@ def _upsert_person(cur: sqlite3.Cursor, table: str, id_col: str,
     row = cur.fetchone()
     if row:
         return row[id_col]
+
+    # 2. If the user did not supply a DOB, reuse any existing record with the
+    #    same name (covers "forgot to fill DOB the second time" — avoids
+    #    creating a duplicate person row across different movies).
+    if dob is None:
+        cur.execute(f"SELECT {id_col} FROM {table} WHERE name = ? LIMIT 1", (name,))
+        row = cur.fetchone()
+        if row:
+            return row[id_col]
+
+    # 3. Otherwise, insert a new row.
     cur.execute(f"INSERT INTO {table} (name, date_of_birth) VALUES (?, ?)", (name, dob))
     return cur.lastrowid
 
@@ -493,6 +568,100 @@ def create_movie():
         "length_min": length_min,
         "company_id": company_id,
         "plot_pdf":   f"/uploads/{pdf_filename}" if pdf_filename else None,
+    })
+
+
+@app.route("/api/actors", methods=["POST"])
+def create_actor():
+    """Standalone Actor input form -> Actor table."""
+    data = request.get_json(silent=True) or request.form
+    name = (data.get("name") or "").strip()
+    dob  = (data.get("date_of_birth") or "").strip() or None
+    if not name:
+        return jsonify({"error": "Actor name is required"}), 400
+    try:
+        conn = get_conn()
+        cur = conn.execute(
+            "INSERT INTO Actor (name, date_of_birth) VALUES (?, ?)",
+            (name, dob),
+        )
+        conn.commit()
+        actor_id = cur.lastrowid
+        conn.close()
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "actor with that name and date of birth already exists"}), 409
+    return jsonify({"status": "ok", "actor_id": actor_id,
+                    "name": name, "date_of_birth": dob})
+
+
+@app.route("/api/reports/movies-between")
+def report_movies_between():
+    """4a — movies released between two years (inclusive), sorted by year."""
+    try:
+        start = int(request.args.get("start", ""))
+        end   = int(request.args.get("end", ""))
+    except ValueError:
+        return jsonify({"error": "start and end must be integer years"}), 400
+    if start > end:
+        start, end = end, start
+
+    sql = """
+        SELECT m.title                                              AS title,
+               (SELECT GROUP_CONCAT(g.name, ', ')
+                  FROM MovieGenre mg
+                  JOIN Genre g ON g.genre_id = mg.genre_id
+                  WHERE mg.movie_id = m.movie_id)                  AS genres,
+               m.year                                              AS year,
+               (SELECT GROUP_CONCAT(d.name, ', ')
+                  FROM MovieDirector md
+                  JOIN Director d ON d.director_id = md.director_id
+                  WHERE md.movie_id = m.movie_id)                  AS directors,
+               pc.name                                             AS company,
+               m.length_min                                        AS length_min
+        FROM Movie m
+        LEFT JOIN ProductionCompany pc ON pc.company_id = m.company_id
+        WHERE m.year BETWEEN ? AND ?
+        ORDER BY m.year, m.title
+    """
+    rows = run_select(sql, (start, end))
+    columns = ["title", "genres", "year", "directors", "company", "length_min"]
+    return jsonify({
+        "title":   f"Movies released between {start} and {end}",
+        "sql":     sql.strip(),
+        "params":  [start, end],
+        "columns": columns,
+        "rows":    rows,
+    })
+
+
+@app.route("/api/reports/directors-acting-in-own-movie")
+def report_directors_acting_in_own_movie():
+    """4b — directors who play a role in a movie they directed."""
+    sql = """
+        SELECT DISTINCT
+               d.name                                              AS director,
+               m.title                                             AS movie,
+               m.year                                              AS year,
+               (SELECT GROUP_CONCAT(g.name, ', ')
+                  FROM MovieGenre mg
+                  JOIN Genre g ON g.genre_id = mg.genre_id
+                  WHERE mg.movie_id = m.movie_id)                  AS genres
+        FROM Director d
+        JOIN MovieDirector md ON md.director_id = d.director_id
+        JOIN Movie         m  ON m.movie_id     = md.movie_id
+        JOIN Actor         a  ON a.name         = d.name
+                              AND IFNULL(a.date_of_birth, '') = IFNULL(d.date_of_birth, '')
+        JOIN MovieActor    ma ON ma.actor_id    = a.actor_id
+                              AND ma.movie_id    = m.movie_id
+        ORDER BY d.name, m.year
+    """
+    rows = run_select(sql)
+    columns = ["director", "movie", "year", "genres"]
+    return jsonify({
+        "title":   "Directors who act in a movie they directed",
+        "sql":     sql.strip(),
+        "columns": columns,
+        "rows":    rows,
     })
 
 

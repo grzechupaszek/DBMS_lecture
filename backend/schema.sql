@@ -69,3 +69,10 @@ CREATE TABLE IF NOT EXISTS Quote (
     FOREIGN KEY (movie_id) REFERENCES Movie(movie_id) ON DELETE CASCADE,
     FOREIGN KEY (actor_id) REFERENCES Actor(actor_id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS User (
+    user_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    role     TEXT NOT NULL DEFAULT 'user'
+);

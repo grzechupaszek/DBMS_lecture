@@ -1,4 +1,4 @@
-"""Minimal Flask + SQLite backend for the MOVIE database demo.
+"""Flask + SQLite backend for the MOVIE.
 
 Run:
     python backend/app.py
@@ -7,9 +7,12 @@ Open http://127.0.0.1:5000/ in a browser.
 """
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
+import time
 from flask import Flask, jsonify, request, send_from_directory
+from werkzeug.utils import secure_filename
 
 BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR     = os.path.dirname(BASE_DIR)
@@ -17,6 +20,10 @@ FRONTEND_DIR = os.path.join(ROOT_DIR, "frontend")
 DB_PATH      = os.path.join(BASE_DIR, "movies.db")
 SCHEMA_PATH  = os.path.join(BASE_DIR, "schema.sql")
 SEED_PATH    = os.path.join(BASE_DIR, "seed.sql")
+UPLOAD_DIR   = os.path.join(BASE_DIR, "uploads")
+
+ALLOWED_PDF_EXT = {".pdf"}
+MAX_UPLOAD_BYTES = 8 * 1024 * 1024   # 8 MB cap on the plot PDF
 
 
 # --------------------------------------------------------------------------- #
@@ -31,6 +38,7 @@ def get_conn() -> sqlite3.Connection:
 
 def init_db() -> None:
     """Create schema and load seed data if DB file does not yet exist."""
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
     fresh = not os.path.exists(DB_PATH)
     conn = get_conn()
     try:
@@ -301,6 +309,191 @@ def run_modification(mid: str):
         return jsonify({"error": str(e), "sql": sql}), 400
     return jsonify({"id": mid, "title": title, "sql": sql.strip(),
                     "params": list(params), "rows_affected": affected})
+
+
+@app.route("/api/genres")
+def list_genres():
+    return jsonify(run_select("SELECT genre_id, name FROM Genre ORDER BY name"))
+
+
+@app.route("/api/companies")
+def list_companies():
+    return jsonify(run_select("SELECT company_id, name FROM ProductionCompany ORDER BY name"))
+
+
+@app.route("/uploads/<path:fname>")
+def serve_upload(fname: str):
+    return send_from_directory(UPLOAD_DIR, fname)
+
+
+def _save_plot_pdf(file_storage) -> str | None:
+    if not file_storage or not file_storage.filename:
+        return None
+    safe = secure_filename(file_storage.filename)
+    if not safe:
+        return None
+    ext = os.path.splitext(safe)[1].lower()
+    if ext not in ALLOWED_PDF_EXT:
+        raise ValueError("plot file must be a .pdf")
+    file_storage.stream.seek(0, os.SEEK_END)
+    size = file_storage.stream.tell()
+    file_storage.stream.seek(0)
+    if size > MAX_UPLOAD_BYTES:
+        raise ValueError(f"plot file too large (>{MAX_UPLOAD_BYTES} bytes)")
+    fname = f"{int(time.time() * 1000)}_{safe}"
+    file_storage.save(os.path.join(UPLOAD_DIR, fname))
+    return fname
+
+
+def _upsert_company(cur: sqlite3.Cursor, name: str | None) -> int | None:
+    if not name:
+        return None
+    cur.execute("SELECT company_id FROM ProductionCompany WHERE name = ?", (name,))
+    row = cur.fetchone()
+    if row:
+        return row["company_id"]
+    cur.execute("INSERT INTO ProductionCompany (name) VALUES (?)", (name,))
+    return cur.lastrowid
+
+
+def _upsert_person(cur: sqlite3.Cursor, table: str, id_col: str,
+                   name: str, dob: str | None) -> int:
+    cur.execute(
+        f"SELECT {id_col} FROM {table} "
+        f"WHERE name = ? AND IFNULL(date_of_birth,'') = IFNULL(?, '')",
+        (name, dob),
+    )
+    row = cur.fetchone()
+    if row:
+        return row[id_col]
+    cur.execute(f"INSERT INTO {table} (name, date_of_birth) VALUES (?, ?)", (name, dob))
+    return cur.lastrowid
+
+
+def _resolve_genre(cur: sqlite3.Cursor, raw: str) -> int | None:
+    """Accepts either an integer genre_id or a genre name (creating it if new)."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    if raw.isdigit():
+        cur.execute("SELECT genre_id FROM Genre WHERE genre_id = ?", (int(raw),))
+        row = cur.fetchone()
+        if row:
+            return row["genre_id"]
+    cur.execute("SELECT genre_id FROM Genre WHERE name = ?", (raw,))
+    row = cur.fetchone()
+    if row:
+        return row["genre_id"]
+    cur.execute("INSERT INTO Genre (name) VALUES (?)", (raw,))
+    return cur.lastrowid
+
+
+@app.route("/api/movies", methods=["POST"])
+def create_movie():
+    """Create a movie + linked rows from the input form (multipart/form-data)."""
+    form = request.form
+
+    title = (form.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "Movie Title is required"}), 400
+    try:
+        year = int(form.get("year"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Year of release must be an integer"}), 400
+
+    length_raw = (form.get("length_min") or "").strip()
+    try:
+        length_min = int(length_raw) if length_raw else None
+    except ValueError:
+        return jsonify({"error": "Length in minutes must be an integer"}), 400
+
+    company_name = (form.get("company") or "").strip() or None
+    genres_raw   = form.get("genres") or "[]"
+    directors_raw = form.get("directors") or "[]"
+    actors_raw    = form.get("actors") or "[]"
+    try:
+        genres    = json.loads(genres_raw)
+        directors = json.loads(directors_raw)
+        actors    = json.loads(actors_raw)
+    except json.JSONDecodeError as e:
+        return jsonify({"error": f"malformed JSON field: {e}"}), 400
+
+    try:
+        pdf_filename = _save_plot_pdf(request.files.get("plot_pdf"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        company_id = _upsert_company(cur, company_name)
+
+        cur.execute(
+            "INSERT INTO Movie (title, year, length_min, company_id, plot_outline) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (title, year, length_min, company_id, pdf_filename),
+        )
+        movie_id = cur.lastrowid
+
+        for g in genres:
+            gid = _resolve_genre(cur, str(g))
+            if gid is not None:
+                cur.execute(
+                    "INSERT OR IGNORE INTO MovieGenre (movie_id, genre_id) VALUES (?, ?)",
+                    (movie_id, gid),
+                )
+
+        for d in directors:
+            dname = (d.get("name") or "").strip()
+            if not dname:
+                continue
+            ddob = (d.get("dob") or "").strip() or None
+            director_id = _upsert_person(cur, "Director", "director_id", dname, ddob)
+            cur.execute(
+                "INSERT OR IGNORE INTO MovieDirector (movie_id, director_id) VALUES (?, ?)",
+                (movie_id, director_id),
+            )
+            if d.get("is_actor"):
+                actor_id = _upsert_person(cur, "Actor", "actor_id", dname, ddob)
+                role = (d.get("actor_role") or "Self").strip() or "Self"
+                cur.execute(
+                    "INSERT OR IGNORE INTO MovieActor (movie_id, actor_id, role) "
+                    "VALUES (?, ?, ?)",
+                    (movie_id, actor_id, role),
+                )
+
+        for a in actors:
+            aname = (a.get("name") or "").strip()
+            if not aname:
+                continue
+            adob  = (a.get("dob") or "").strip() or None
+            arole = (a.get("role") or "").strip() or "Unknown"
+            actor_id = _upsert_person(cur, "Actor", "actor_id", aname, adob)
+            cur.execute(
+                "INSERT OR IGNORE INTO MovieActor (movie_id, actor_id, role) "
+                "VALUES (?, ?, ?)",
+                (movie_id, actor_id, arole),
+            )
+
+        conn.commit()
+    except sqlite3.IntegrityError as e:
+        conn.rollback()
+        return jsonify({"error": f"integrity error: {e}"}), 400
+    except sqlite3.Error as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 400
+    finally:
+        conn.close()
+
+    return jsonify({
+        "status":     "ok",
+        "movie_id":   movie_id,
+        "title":      title,
+        "year":       year,
+        "length_min": length_min,
+        "company_id": company_id,
+        "plot_pdf":   f"/uploads/{pdf_filename}" if pdf_filename else None,
+    })
 
 
 @app.route("/api/reset", methods=["POST"])

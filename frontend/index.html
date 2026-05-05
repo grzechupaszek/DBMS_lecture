@@ -9,6 +9,7 @@
   <header>
     <h1>MOVIE Database</h1>
     <p class="subtitle">Flask + SQLite minimal demo. Pick a query on the left, see the result on the right.</p>
+    <button id="add-movie-btn" title="Open the input form to add a new movie">Add Movie</button>
     <button id="reset-btn" title="Drop the DB file and reload the seed data">Reset database</button>
   </header>
 
@@ -24,7 +25,117 @@
       <div id="result-table"></div>
       <p id="result-error"></p>
     </section>
+
+    <!-- ====== Input form for movie database ====== -->
+    <section id="movie-form-view" hidden>
+      <form id="movie-form" enctype="multipart/form-data">
+        <h2 class="form-title">INPUT FORM FOR MOVIE DATABASE</h2>
+
+        <div class="form-grid">
+          <!-- left column -->
+          <div class="form-col">
+            <label class="field">
+              <span class="lbl">Movie Title</span>
+              <input type="text" name="title" required>
+            </label>
+
+            <div class="field">
+              <span class="lbl">Movie ID (automated)</span>
+              <input type="text" value="auto-generated" disabled>
+            </div>
+
+            <label class="field">
+              <span class="lbl">Length in minutes:</span>
+              <input type="number" name="length_min" min="1" max="999">
+            </label>
+
+            <label class="field">
+              <span class="lbl">Year of release:</span>
+              <input type="number" name="year" min="1888" max="2100" required>
+            </label>
+
+            <label class="field">
+              <span class="lbl">Genre: (in a drop down)</span>
+              <select name="genre" id="genre-select">
+                <option value="">-- choose a genre --</option>
+              </select>
+              <input type="text" id="genre-new" placeholder="or type a new genre" class="genre-new">
+            </label>
+
+            <label class="field">
+              <span class="lbl">Plot online (a pdf file will be attached)</span>
+              <input type="file" name="plot_pdf" accept="application/pdf">
+            </label>
+
+            <label class="field">
+              <span class="lbl">Production Company:</span>
+              <input type="text" name="company" list="company-list">
+              <datalist id="company-list"></datalist>
+            </label>
+          </div>
+
+          <!-- right column -->
+          <div class="form-col">
+            <h3 class="block-title">Directors</h3>
+            <div id="directors-list"></div>
+            <button type="button" class="add-row" id="add-director-btn">+ Add Author</button>
+
+            <h3 class="block-title">Actors</h3>
+            <div id="actors-list"></div>
+            <button type="button" class="add-row" id="add-actor-btn">+ Add Another (Y/N)?</button>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" id="form-cancel">Cancel</button>
+          <button type="submit" class="confirm">CONFIRM?</button>
+        </div>
+
+        <p id="form-status"></p>
+      </form>
+    </section>
   </main>
+
+  <!-- row templates -->
+  <template id="director-row-template">
+    <div class="row director-row">
+      <label class="field grow">
+        <span class="lbl">Director:</span>
+        <input type="text" class="d-name" placeholder="director name">
+      </label>
+      <label class="field">
+        <span class="lbl">Date of birth (optional)</span>
+        <input type="date" class="d-dob">
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" class="d-is-actor">
+        Is he/she actor also (Y/N)
+      </label>
+      <label class="field d-actor-role-wrap" hidden>
+        <span class="lbl">Role (as actor)</span>
+        <input type="text" class="d-actor-role" placeholder="Self">
+      </label>
+      <button type="button" class="remove-row" title="Remove">&times;</button>
+    </div>
+  </template>
+
+  <template id="actor-row-template">
+    <div class="row actor-row">
+      <label class="field grow">
+        <span class="lbl">Actors</span>
+        <input type="text" class="a-name" placeholder="actor name">
+      </label>
+      <label class="field">
+        <span class="lbl">Date of birth (optional)</span>
+        <input type="date" class="a-dob">
+      </label>
+      <label class="field grow">
+        <span class="lbl">Role</span>
+        <input type="text" class="a-role" placeholder="role in this movie">
+      </label>
+      <button type="button" class="remove-row" title="Remove">&times;</button>
+    </div>
+  </template>
 
   <script src="/script.js"></script>
 </body>
